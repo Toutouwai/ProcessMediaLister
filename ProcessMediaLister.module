@@ -1,0 +1,751 @@
+<?php namespace ProcessWire;
+
+class ProcessMediaLister extends Process implements ConfigurableModule {
+
+	/**
+	 * Module information
+	 */
+	public static function getModuleinfo() {
+		return array(
+			'title' => 'Media Lister',
+			'summary' => 'Lists images and files in the site.',
+			'version' => '0.1.0',
+			'author' => 'Robin Sallis',
+			'href' => 'https://github.com/Toutouwai/ProcessMediaLister',
+			'icon' => 'th-large',
+			'requires' => 'ProcessWire>=3.0.226, PHP>=7.0.0',
+			'installs' => 'MediaLister',
+			'page' => array(
+				'name' => 'media-lister',
+				'title' => 'Media Lister',
+				'parent' => 'setup',
+			),
+			'permission' => 'media-lister',
+			'permissions' => array(
+				'media-lister' => 'Use the Media Lister module'
+			),
+			'useNavJSON' => true,
+		);
+	}
+
+	/**
+	 * Column labels
+	 */
+	protected $columnLabels = [];
+
+	/**
+	 * Other labels
+	 */
+	protected $otherLabels = [];
+
+	/**
+	 * The "gridSize" of the admin thumbnail
+	 */
+	protected $thumbsize;
+
+	/**
+	 * Columns for images
+	 */
+	protected $imageCols = [
+		'page',
+		'field',
+		'filename',
+		'uploadname',
+		'thumbnail',
+		'description',
+		'filedata',
+		'tags',
+		'filesize',
+		'width',
+		'height',
+		'ratio',
+		'modified',
+		'created',
+		'sort',
+	];
+
+	/**
+	 * Columns for files
+	 */
+	protected $fileCols = [
+		'page',
+		'field',
+		'filename',
+		'uploadname',
+		'description',
+		'filedata',
+		'tags',
+		'filesize',
+		'modified',
+		'created',
+		'sort',
+	];
+
+	/**
+	 * Construct
+	 */
+	public function __construct() {
+		// Labels
+		$this->columnLabels = [
+			'page' => $this->_('Page'),
+			'field' => $this->_('Field'),
+			'filename' => $this->_('Filename'),
+			'uploadname' => $this->_('Upload name'),
+			'thumbnail' => $this->_('Thumbnail'),
+			'description' => $this->_('Description'),
+			'filedata' => $this->_('Filedata'),
+			'tags' => $this->_('Tags'),
+			'filesize' => $this->_('Filesize'),
+			'width' => $this->_('Width'),
+			'height' => $this->_('Height'),
+			'ratio' => $this->_('Ratio'),
+			'modified' => $this->_('Modified'),
+			'created' => $this->_('Created'),
+			'sort' => $this->_('Sort'),
+		];
+		$this->otherLabels = [
+			'images' => $this->_('Images'),
+			'files' => $this->_('Files'),
+			'small_thumbs' => $this->_('Small thumbnails'),
+			'large_thumbs' => $this->_('Large thumbnails'),
+			'table' => $this->_('Table'),
+		];
+		$thumbsize = $this->wire()->config->adminThumbOptions('gridSize') ?: 130;
+		$this->thumbsize = $thumbsize * 2;
+		$this->bookmarks = [];
+		$this->defaultMediaType = 'images';
+		$this->defaultViewMode = 'pml-small-thumbs';
+		$this->defaultPaginationLimit = 50;
+		$this->defaultImageCols = array_diff($this->imageCols, [
+			'uploadname',
+			'filedata',
+			'tags',
+			'ratio',
+			'sort',
+		]);
+		$this->defaultFileCols = array_diff($this->fileCols, [
+			'uploadname',
+			'filedata',
+			'tags',
+			'sort',
+		]);
+		parent::__construct();
+	}
+
+	/**
+	 * Flyout menu for bookmarks
+	 *
+	 * @param array $options
+	 * @return string
+	 */
+	public function ___executeNavJSON($options = []) {
+		$options['add'] = false;
+		$options['edit'] = '?bookmark={id}';
+		$options['itemLabel'] = 'label';
+		$options['items'] = [];
+		foreach($this->bookmarks as $id => $bookmark) {
+			$options['items'][] = [
+				'id' => $id,
+				'label' => $bookmark['label'],
+			];
+		}
+		return parent::___executeNavJSON($options);
+	}
+
+	/**
+	 * Execute
+	 */
+	public function ___execute() {
+		$modules = $this->wire()->modules;
+		$input = $this->wire()->input;
+		$config = $this->wire()->config;
+		$info = $this->getModuleInfo();
+		$version = $info['version'];
+
+		// Load DataTables
+		$config->scripts->add($config->urls->$this . "datatables/datatables.min.js?v=$version");
+		$config->styles->add($config->urls->$this . "datatables/datatables.min.css?v=$version");
+
+		// Load Tooltipster
+		$config->scripts->add($config->urls->$this . "tooltipster/tooltipster.bundle.min.js?v=$version");
+		$config->styles->add($config->urls->$this . "tooltipster/tooltipster.bundle.min.css?v=$version");
+
+		// Load Magnific
+		$modules->get('JqueryMagnific');
+
+		// Defaults
+		$media_type = $this->defaultMediaType;
+		$pages_selector = 'template=, title%=';
+		$bookmarked_selector = false;
+		$js_settings = [];
+		// Table: common
+		$table_settings = [
+			'bookmark' => '',
+			'limit' => $this->defaultPaginationLimit,
+			'sort' => [],
+			'search_builder' => new \stdClass(), // To create empty object in JSON
+		];
+		// Table: images
+		$js_settings['table']['images'] = $table_settings;
+		$hidden_cols = [];
+		foreach($this->imageCols as $key => $value) {
+			if(!in_array($value, $this->defaultImageCols)) $hidden_cols[] = $key;
+		}
+		$js_settings['table']['images']['hidden_cols'] = $hidden_cols;
+		$js_settings['table']['images']['search_cols'] = [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+		$js_settings['table']['images']['mode'] = $this->defaultViewMode;
+		// Table: files
+		$js_settings['table']['files'] = $table_settings;
+		$hidden_cols = [];
+		foreach($this->fileCols as $key => $value) {
+			if(!in_array($value, $this->defaultFileCols)) $hidden_cols[] = $key;
+		}
+		$js_settings['table']['files']['hidden_cols'] = $hidden_cols;
+
+		// Bookmark
+		$bm = (int) $input->get('bookmark');
+		if($bm && isset($this->bookmarks[$bm])) {
+			$bookmark = $this->bookmarks[$bm];
+			$this->headline($this->wire()->page->title . ' - ' . $this->wire()->sanitizer->entities($bookmark['label']));
+			$media_type = $bookmark['media_type'];
+			$pages_selector = $bookmark['pages_selector'];
+			$bookmarked_selector = true;
+			$js_settings['table'][$media_type] = $bookmark['table_settings'];
+			$js_settings['table'][$media_type]['bookmark'] = $bm;
+		}
+
+		// Settings to JS
+		$config->js('ProcessMediaLister', $js_settings);
+
+		// Reset button
+		$href = './';
+		if($bm) $href .= "?bookmark=$bm";
+		/** @var InputfieldButton $b */
+		$b = $modules->get('InputfieldButton');
+		$b->value = $this->_('Reset');
+		$b->href = $href;
+		$b->showInHeader();
+		$b->icon = 'rotate-left';
+		$b->addClass('pml-reset');
+		$b->aclass = 'pml-reset-link';
+		$out = $b->render();
+
+		/** @var InputfieldForm $form */
+		$form = $modules->get('InputfieldForm');
+		$form->action = './bookmark/';
+		$form->id = 'pml-filters';
+
+		/** @var InputfieldRadios $f */
+		$f = $modules->get('InputfieldRadios');
+		$f->name = 'media_type';
+		$f->label = $this->_('Media type');
+		$f->icon = 'file-o';
+		$f->addOption('images', $this->otherLabels['images']);
+		$f->addOption('files', $this->otherLabels['files']);
+		$f->value = $media_type;
+		$f->optionColumns = 1;
+		$f->columnWidth = 50;
+		$form->add($f);
+
+		/** @var InputfieldMarkup $f */
+		$f = $modules->get('InputfieldMarkup');
+		$f->name = 'view_mode';
+		$f->label = $this->_('View mode');
+		$f->icon = 'eye';
+		$f->value = <<<EOT
+<button type="button" data-mode="pml-small-thumbs">
+	<i class="fa fa-th"></i> 
+	{$this->otherLabels['small_thumbs']}
+</button>
+<button type="button" data-mode="pml-large-thumbs">
+	<i class="fa fa-th-large"></i> 
+	{$this->otherLabels['large_thumbs']}
+</button>
+<button type="button" data-mode="pml-table">
+	<i class="fa fa-table"></i> 
+	{$this->otherLabels['table']}
+</button>
+EOT;
+		$f->columnWidth = 50;
+		$f->showIf = 'media_type=images';
+		$form->add($f);
+
+		/** @var InputfieldSelector $f */
+		$f = $modules->get('InputfieldSelector');
+		$f->name = 'pages_selector';
+		$f->label = $this->_('From pages matching');
+		$f->icon = 'search-plus';
+		$f->counter = false;
+		$f->preview = false;
+		$f->exclude = 'sort';
+		// Allow blank values so that bookmarks can include empty filter rows
+		$f->allowBlankValues = true;
+		$f->value = $pages_selector;
+		if($bookmarked_selector) $f->wrapClass('has-selector');
+		$form->add($f);
+
+		// Add bookmark fields if superuser
+		if($this->wire()->user->isSuperuser()) {
+			/** @var InputfieldText $f */
+			$f = $modules->get('InputfieldText');
+			$f->name = 'bookmark';
+			$f->label = $this->_('Add bookmark');
+			$f->icon = 'bookmark';
+			$f->attr('required', true);
+			$f->appendMarkup = '<button id="pml-bookmark-save" class="ui-button ui-state-default">' . $this->_('Add bookmark') . '</button>';
+			$f->collapsed = Inputfield::collapsedYes;
+			$form->add($f);
+
+			/** @var InputfieldHidden $f */
+			$f = $modules->get('InputfieldHidden');
+			$f->name = 'table_settings';
+			$f->id = 'pml-table-settings';
+			$form->add($f);
+		}
+
+		$out .= $form->render();
+		$out .= '<div id="media-lister-results"></div>';
+
+		return $out;
+	}
+
+	/**
+	 * Execute results list
+	 */
+	public function ___executeResults() {
+		$input = $this->wire()->input;
+		$config = $this->wire()->config;
+		$fields = $this->wire()->fields;
+		$sanitizer = $this->wire()->sanitizer;
+		$database = $this->wire()->database;
+
+		$type = $input->post('type');
+		$selector_str = $input->post('selector');
+		if(!$config->ajax) return '';
+
+		$repeater_connections = $this->getRepeaterConnections();
+		// Repeaters belonging to each non-repeater owner
+		$repeaters = $repeater_connections['repeaters'];
+
+		// Remove blank selector components
+		// This is necessary because allowBlankValues is true for InputfieldSelector
+		$selectors = new Selectors($selector_str);
+		foreach($selectors as $selector) {
+			if($selector['value'] === '') $selectors->remove($selector);
+		}
+		$selector_str = (string) $selectors;;
+
+		// Get "where" clause for SQL query
+		$where = '';
+		if($selector_str) {
+			// Get IDs matching selector
+			$ids = $this->wire()->pages->findIDs($selector_str);
+			// Add any descendent repeater pages
+			$to_merge = [];
+			foreach($ids as $id) {
+				if(isset($repeaters[$id])) {
+					$to_merge[] = $repeaters[$id];
+				}
+			}
+			$ids = array_merge($ids, ...$to_merge);
+			if(!$ids) return $this->_('No pages matched your filter.');
+			$where = ' WHERE pages_id IN(' . implode(',', $ids) . ')';
+		}
+
+		// Get images/files fields and columns
+		$is_images = $type === 'images';
+		if($is_images) {
+			$flds = $fields->find("type=FieldtypeImage");
+			if(!$flds->count) return $this->_('Site has no image fields.');
+			$cols = 'pages_id, data, description, filedata, filesize, width, height, ratio, modified, created, sort';
+		} else {
+			$flds = $fields->find("type=FieldtypeFile");
+			if(!$flds->count) return $this->_('Site has no file fields.');
+			$cols = 'pages_id, data, description, filedata, filesize, modified, created, sort';
+		}
+
+		// Get data for table
+		$owners = $repeater_connections['owners'];
+		$custom_fields = [];
+		$data = [];
+		$page_ids = [];
+		foreach($flds as $field) {
+			/** @var Template $template */
+			$template = $field->type->getFieldsTemplate($field);
+			if($template) {
+				foreach($template->fieldgroup as $fld) {
+					$custom_fields[$field->name]['_' . $fld->id] = $template->fieldgroup->getFieldContext($fld)->label;
+				}
+			}
+			if($field->useTags) $cols .= ', tags';
+			$results = $database->query("SELECT $cols FROM field_{$field->name}$where");
+			$data[$field->name] = $results->fetchAll(\PDO::FETCH_ASSOC);
+			$page_ids = $page_ids + array_flip(array_column($data[$field->name], 'pages_id'));
+		}
+		$page_ids = array_keys($page_ids);
+		// Replace any repeater IDs with their root owner page ID
+		foreach($page_ids as $key => $page_id) {
+			if(isset($owners[$page_id])) $page_ids[$key] = reset($owners[$page_id]);
+		}
+		// Get page titles
+		if($page_ids) {
+			$results = $database->query('SELECT pages_id, data FROM field_title WHERE pages_id IN(' . implode(',', $page_ids) . ')');
+			$titles = $results->fetchAll(\PDO::FETCH_KEY_PAIR);
+		} else {
+			$titles = [];
+		}
+
+		// Results table
+		$out = "<div id='pml-results-table'>";
+		$out .= "<table id='pml-table' class='display' style='width:100%;'>";
+
+		// Table header
+		$out .= '<thead><tr>';
+		$out .= "<th class='pml-page'>{$this->columnLabels['page']}</th>";
+		$out .= "<th class='pml-field'>{$this->columnLabels['field']}</th>";
+		$out .= "<th class='pml-filename'>{$this->columnLabels['filename']}</th>";
+		$out .= "<th class='pml-uploadname'>{$this->columnLabels['uploadname']}</th>";
+		if($is_images) $out .= "<th class='pml-thumbnail'>{$this->columnLabels['thumbnail']}</th>";
+		$out .= "<th class='pml-description'>{$this->columnLabels['description']}</th>";
+		$out .= "<th class='pml-filedata'>{$this->columnLabels['filedata']}</th>";
+		$out .= "<th class='pml-tags'>{$this->columnLabels['tags']}</th>";
+		$out .= "<th class='pml-filesize'>{$this->columnLabels['filesize']}</th>";
+		if($is_images) {
+			$out .= "<th class='pml-width'>{$this->columnLabels['width']}</th>";
+			$out .= "<th class='pml-height'>{$this->columnLabels['height']}</th>";
+			$out .= "<th class='pml-ratio'>{$this->columnLabels['ratio']}</th>";
+		}
+		$out .= "<th class='pml-modified'>{$this->columnLabels['modified']}</th>";
+		$out .= "<th class='pml-created'>{$this->columnLabels['created']}</th>";
+		$out .= "<th class='pml-sort'>{$this->columnLabels['sort']}</th>";
+		$out .= '</tr></thead>';
+
+		// Table body
+		$out .= '<tbody>';
+		$admin_url = $config->urls->admin;
+		$asset_url = $config->urls->files;
+		foreach($data as $field_name => $field_data) {
+			foreach($field_data as $item) {
+				$out .= '<tr>';
+				// Page title and edit link
+				$page_id = $item['pages_id'];
+				$prefix = '';
+				$edit_url = "{$admin_url}page/edit/?id=$page_id#find-$field_name";
+				if(isset($owners[$page_id])) {
+					$connections = $owners[$page_id];
+					$root_id = array_shift($connections);
+					if($connections) {
+						$open = implode(',', $connections) . ",$page_id";
+					} else {
+						$open = $page_id;
+					}
+					$edit_url = "{$admin_url}page/edit/?id=$root_id&pml_open=$open#find-{$field_name}_repeater$page_id";
+					$page_id = $root_id;
+					$prefix = '*';
+				}
+				$title = isset($titles[$page_id]) ? $sanitizer->entities($titles[$page_id]) : $page_id;
+				$edit_link = "<a href='$edit_url'>{$prefix}{$title}</a>";
+
+				// Description
+				$description = wireDecodeJSON($item['description']);
+				if($description) {
+					$description = array_filter($description);
+					$description = $this->arrayToText($description);
+				} else {
+					$description = $item['description'];
+				}
+				$description = $sanitizer->entities($description);
+
+				// Filedata and uploadName
+				$upload_name = '';
+				$filedata = '';
+				if($item['filedata']) {
+					$filedata = [];
+					$fdata = wireDecodeJSON($item['filedata']);
+					foreach($fdata as $key => $value) {
+						if(is_array($value)) $value = array_filter($value);
+						if(!$value) continue;
+						if($key === 'uploadName') {
+							$upload_name = $sanitizer->entities($value);
+						}
+						elseif(isset($custom_fields[$field_name][$key])) {
+							$filedata[$custom_fields[$field_name][$key]] = $value;
+						}
+					}
+					$filedata = $filedata ? $sanitizer->entities($this->arrayToText($filedata)) : '';
+				}
+
+				// Tags
+				$tags = $item['tags'] ?? '';
+
+				// Row items
+				$out .= "<td data-order='{$title}{$prefix}' class='pml-page'>$edit_link</td>";
+				$out .= "<td class='pml-field'>$field_name</td>";
+				$out .= "<td class='pml-filename'>{$item['data']}</td>";
+				$out .= "<td class='pml-uploadname'>$upload_name</td>";
+
+				if($is_images) {
+					// Thumbnail
+					$pieces = explode('.', $item['data']);
+					$ext = end($pieces);
+					$image_url = "{$asset_url}{$item['pages_id']}/{$item['data']}";
+					if($ext === 'svg') {
+						$thumb_url = $image_url;
+					} else {
+						// Use the image ratio to work out the thumbnail size if available
+						if(!empty($item['ratio'])) {
+							$thumb_size = $item['ratio'] < 1 ? ".{$this->thumbsize}x0." : ".0x{$this->thumbsize}.";
+						} else {
+							$thumb_size = ".0x{$this->thumbsize}.";
+						}
+						$thumb_url = $asset_url . $item['pages_id'] . '/' . str_replace('.', $thumb_size, $item['data']);
+						// If there's no thumbnail at that URL try reversing the thumbnail size values
+						if(!is_file($config->paths->root . $thumb_url)) {
+							$thumb_size = $thumb_size === ".{$this->thumbsize}x0." ? ".0x{$this->thumbsize}." : ".{$this->thumbsize}x0.";
+							$thumb_url = $asset_url . $item['pages_id'] . '/' . str_replace('.', $thumb_size, $item['data']);
+						}
+						// If there's still no thumbnail then fall back to the full image
+						if(!is_file($config->paths->root . $thumb_url)) {
+							$thumb_url = $image_url;
+						}
+					}
+					$thumb_markup = <<<EOT
+<a class="pml-thumb-icon pml-edit" href="$edit_url"><i class="fa fa-pencil"></i></a>
+<div class="pml-thumb-icon pml-info"><i class="fa fa-info-circle"></i></div>
+<a class="pml-thumb" href="$image_url" target="_blank">
+	<img src="$thumb_url" alt="" loading="lazy">
+</a>
+EOT;
+					$out .= "<td class='pml-thumbnail'>$thumb_markup</td>";
+				}
+
+				$out .= "<td class='pml-description'>$description</td>";
+				$out .= "<td class='pml-filedata'>$filedata</td>";
+				$out .= "<td class='pml-tags'>$tags</td>";
+				$out .= "<td class='pml-filesize'>{$item['filesize']}</td>";
+				if($is_images) {
+					$out .= "<td class='pml-width'>{$item['width']}</td>";
+					$out .= "<td class='pml-height'>{$item['height']}</td>";
+					$out .= "<td class='pml-ratio'>{$item['ratio']}</td>";
+				}
+				$out .= "<td class='pml-modified'>{$item['modified']}</td>";
+				$out .= "<td class='pml-created'>{$item['created']}</td>";
+				$out .= "<td class='pml-sort'>{$item['sort']}</td>";
+
+				$out .= '</tr>';
+			}
+		}
+		$out .= '</tbody>';
+		$out .= '</table>';
+		$out .= '</div>';
+		return $out;
+	}
+
+	/**
+	 * Get owner connections for all Repeater-type pages
+	 */
+	protected function getRepeaterConnections() {
+		$data = [
+			'owners' => [],
+			'repeaters' => [],
+		];
+
+		// Get all Repeater-type fields
+		$repeater_fields = $this->wire()->fields->find("type=FieldtypeRepeater|FieldtypeRepeaterMatrix|FieldtypeFieldsetPage");
+		if(!$repeater_fields->count) return $data;
+
+		// Get field values from database
+		$queries = [];
+		foreach($repeater_fields as $repeater_field) {
+			$queries[] = "SELECT pages_id, data FROM field_{$repeater_field->name}";
+		}
+		$query = implode(' UNION ALL ', $queries);
+		$results = $this->wire()->database->query($query);
+		$data = $results->fetchAll(\PDO::FETCH_ASSOC);
+
+		// Populate temporary connections array
+		$connections = [];
+		foreach($data as $item) {
+			$repeater_ids = explode(',', $item['data']);
+			foreach($repeater_ids as $id) {
+				$connections[$id] = (int) $item['pages_id'];
+			}
+		}
+
+		// Work out the owners of each repeater
+		foreach($connections as $repeater_id => $owner_id) {
+			$data['owners'][$repeater_id] = [$owner_id];
+			$id = $owner_id;
+			while(isset($connections[$id])) {
+				$id = $connections[$id];
+				array_unshift($data['owners'][$repeater_id], $id);
+			}
+		}
+
+		// Work out the repeaters belonging to each non-repeater owner
+		foreach($data['owners'] as $repeater_id => $owner_ids) {
+			$owner_id = array_shift($owner_ids);
+			if(!isset($data['repeaters'][$owner_id])) $data['repeaters'][$owner_id] = [];
+			$data['repeaters'][$owner_id][$repeater_id] = '';
+			foreach($owner_ids as $id) {
+				$data['repeaters'][$owner_id][$id] = '';
+			}
+		}
+		foreach($data['repeaters'] as $key => $value) {
+			$data['repeaters'][$key] = array_keys($value);
+		}
+
+		return $data;
+	}
+
+	/**
+	 * Convert an array to text that is roughly similar to YAML
+	 */
+	protected function arrayToText($data, $level = 0) {
+		$prefix = str_repeat('  ', $level);
+		$yaml = '';
+		foreach($data as $key => $value) {
+			if(is_array($value)) {
+				$yaml .= "{$prefix}{$key}:\n";
+				$yaml .= $this->arrayToText($value, $level + 1);
+			} else {
+				$yaml .= "{$prefix}{$key}: $value\n";
+			}
+		}
+		return $yaml;
+	}
+
+	/**
+	 * Execute bookmark save
+	 */
+	public function ___executeBookmark() {
+		$input = $this->wire()->input;
+		$modules = $this->wire()->modules;
+		$sanitizer = $this->wire()->sanitizer;
+		/** @var InputfieldSelector $is */
+		$is = $modules->get('InputfieldSelector');
+		$bookmarks = $this->bookmarks;
+		$ts = time();
+		$label = $sanitizer->text($input->post('bookmark'));
+		// Check to see if this should update an existing bookmark
+		foreach($bookmarks as $key => $bookmark) {
+			if($bookmark['label'] === $label) {
+				$ts = $key;
+				break;
+			}
+		}
+		// Fallback in case no label supplied (should never happen)
+		if(!$label) $label = $ts;
+		$media_type = $sanitizer->option($input->post('media_type'), ['images', 'files']);
+		$pages_selector = $is->sanitizeSelectorString($input->post('pages_selector'));
+		$table_settings = wireDecodeJSON($input->post('table_settings'));
+		$bookmarks[$ts] = [
+			'label' => $label,
+			'media_type' => $media_type,
+			'pages_selector' => $pages_selector,
+			'table_settings' => $table_settings,
+		];
+		$modules->saveConfig($this, 'bookmarks', $bookmarks);
+		$this->wire()->session->location("../?bookmark=$ts");
+	}
+
+	/**
+	 * Config inputfields
+	 *
+	 * @param InputfieldWrapper $inputfields
+	 */
+	public function getModuleConfigInputfields($inputfields) {
+		$modules = $this->wire()->modules;
+		$input = $this->wire()->input;
+		$bookmarks = $this->bookmarks;
+
+		$delete = $input->post('deleteBookmark');
+		if($delete && isset($bookmarks[$delete])) {
+			unset($bookmarks[$delete]);
+			$modules->saveConfig($this, 'bookmarks', $bookmarks);
+			$modules->saveConfig($this, 'deleteBookmark', '');
+			$this->wire()->session->location($this->wire()->input->url(true));
+		}
+
+		/** @var InputfieldRadios $f */
+		$f = $modules->get('InputfieldRadios');
+		$f_name = 'defaultMediaType';
+		$f->name = $f_name;
+		$f->label = $this->_('Default media type');
+		$f->icon = 'file-o';
+		$f->addOption('images', $this->otherLabels['images']);
+		$f->addOption('files', $this->otherLabels['files']);
+		$f->optionColumns = 1;
+		$f->value = $this->$f_name;
+		$f->columnWidth = 33;
+		$inputfields->add($f);
+
+		/** @var InputfieldRadios $f */
+		$f = $modules->get('InputfieldRadios');
+		$f_name = 'defaultViewMode';
+		$f->name = $f_name;
+		$f->label = $this->_('Default view mode for images');
+		$f->icon = 'eye';
+		$f->addOption('pml-small-thumbs', $this->otherLabels['small_thumbs']);
+		$f->addOption('pml-large-thumbs', $this->otherLabels['large_thumbs']);
+		$f->addOption('pml-table', $this->otherLabels['table']);
+		$f->optionColumns = 1;
+		$f->value = $this->$f_name;
+		$f->columnWidth = 34;
+		$inputfields->add($f);
+
+		/** @var InputfieldSelect $f */
+		$f = $modules->get('InputfieldSelect');
+		$f_name = 'defaultPaginationLimit';
+		$f->name = $f_name;
+		$f->label = $this->_('Default pagination limit');
+		$f->icon = 'fast-forward';
+		$f->addOption(10, 10);
+		$f->addOption(25, 25);
+		$f->addOption(50, 50);
+		$f->addOption(100, 100);
+		$f->value = $this->$f_name;
+		$f->columnWidth = 33;
+		$inputfields->add($f);
+
+		/** @var InputfieldCheckboxes $f */
+		$f = $modules->get('InputfieldCheckboxes');
+		$f_name = 'defaultImageCols';
+		$f->name = $f_name;
+		$f->label = $this->_('Default columns for images');
+		foreach($this->imageCols as $col) {
+			$f->addOption($col, $this->columnLabels[$col]);
+		}
+		$f->value = $this->$f_name;
+		$f->columnWidth = 50;
+		$inputfields->add($f);
+
+		/** @var InputfieldCheckboxes $f */
+		$f = $modules->get('InputfieldCheckboxes');
+		$f_name = 'defaultFileCols';
+		$f->name = $f_name;
+		$f->label = $this->_('Default columns for files');
+		foreach($this->fileCols as $col) {
+			$f->addOption($col, $this->columnLabels[$col]);
+		}
+		$f->value = $this->$f_name;
+		$f->columnWidth = 50;
+		$inputfields->add($f);
+
+		if($this->bookmarks) {
+			/** @var InputfieldSelect $f */
+			$f = $modules->get('InputfieldSelect');
+			$f_name = 'deleteBookmark';
+			$f->name = $f_name;
+			$f->label = $this->_('Delete a bookmark');
+			$f->description = $this->_('To delete an existing bookmark, select it below and then submit.');
+			$f->icon = 'trash-o';
+			foreach($bookmarks as $key => $bookmark) {
+				$f->addOption($key, $this->wire()->sanitizer->entities($bookmark['label']));
+			}
+			$f->collapsed = Inputfield::collapsedYes;
+			$inputfields->add($f);
+		}
+	}
+
+}
