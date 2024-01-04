@@ -133,7 +133,7 @@ class ProcessMediaLister extends Process implements ConfigurableModule {
 		$modules = $this->wire()->modules;
 		$input = $this->wire()->input;
 		$config = $this->wire()->config;
-		$info = $this->getModuleInfo();
+		$info = $modules->getModuleInfo($this);
 		$version = $info['version'];
 
 		// Load DataTables
@@ -339,6 +339,8 @@ EOT;
 		}
 
 		// Get data for table
+		$has_languages = !is_null($this->wire()->languages);
+		$langs = $has_languages ? $this->wire()->languages->getAll()->explode('name', ['key' => 'id']) : [];
 		$owners = $repeater_connections['owners'];
 		$custom_fields = [];
 		$data = [];
@@ -351,8 +353,9 @@ EOT;
 					$custom_fields[$field->name]['_' . $fld->id] = $template->fieldgroup->getFieldContext($fld)->label;
 				}
 			}
-			if($field->useTags) $cols .= ', tags';
-			$results = $database->query("SELECT $cols FROM field_{$field->name}$where");
+			$select_cols = $cols;
+			if($field->useTags) $select_cols .= ', tags';
+			$results = $database->query("SELECT $select_cols FROM field_{$field->name}$where");
 			$data[$field->name] = $results->fetchAll(\PDO::FETCH_ASSOC);
 			$page_ids = $page_ids + array_flip(array_column($data[$field->name], 'pages_id'));
 		}
@@ -421,10 +424,23 @@ EOT;
 				$edit_link = "<a href='$edit_url'>{$prefix}{$title}</a>";
 
 				// Description
-				$description = wireDecodeJSON($item['description']);
-				if($description) {
-					$description = array_filter($description);
-					$description = $this->arrayToText($description);
+				if($has_languages) {
+					// Convert language IDs to language names
+					$description = wireDecodeJSON($item['description']);
+					if($description) {
+						$description = array_filter($description);
+						$lang_description = [];
+						foreach($description as $key => $value) {
+							if($key === 0) {
+								$lang_description['default'] = $value;
+							} elseif(isset($langs[$key])) {
+								$lang_description[$langs[$key]] = $value;
+							} else {
+								$lang_description[$key] = $value;
+							}
+						}
+						$description = $this->arrayToText($lang_description);
+					}
 				} else {
 					$description = $item['description'];
 				}
@@ -443,6 +459,20 @@ EOT;
 							$upload_name = $sanitizer->entities($value);
 						}
 						elseif(isset($custom_fields[$field_name][$key])) {
+							if($has_languages && is_array($value)) {
+								// Convert "data" keys to language names
+								foreach($value as $k => $v) {
+									if(is_numeric($k)) continue;
+									unset($value[$k]);
+									$k = str_replace('data', '', $k);
+									if($k === '') {
+										$k = 'default';
+									} else {
+										$k = $langs[$k] ?? $k;
+									}
+									$value[$k] = $v;
+								}
+							}
 							$filedata[$custom_fields[$field_name][$key]] = $value;
 						}
 					}
