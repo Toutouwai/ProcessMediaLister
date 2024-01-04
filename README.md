@@ -4,7 +4,13 @@ Lists images and files from across the site in a sortable and filterable table. 
 
 The module retrieves the data using SQL queries so is able to efficiently list media information for all but the largest of sites.
 
+### Images in small thumbnails view mode
+
 ![ml-main](https://github.com/Toutouwai/ProcessMediaLister/assets/1538852/25f06cdc-2ea2-4e4f-9a7b-9e371c8ae1c0)
+
+### Files saved as a bookmark
+
+![ml-main-2](https://github.com/Toutouwai/ProcessMediaLister/assets/1538852/524fedc6-b462-4969-ba81-772407701ad7)
 
 ## Controls
 
