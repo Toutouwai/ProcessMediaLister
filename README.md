@@ -16,7 +16,7 @@ The module retrieves the data using SQL queries so is able to efficiently list m
 
 **Media type:** Choose between Images and Files.
 
-**View mode:**: When listing images you can choose between small thumbnails, large thumbnails and table view modes. When in one of the thumbnail view modes you can see information about the image in a tooltip by clicking the "i" icon, or edit the page containing the image by clicking the pencil icon.
+**View mode:** When listing images you can choose between small thumbnails, large thumbnails and table view modes. When in one of the thumbnail view modes you can see information about the image in a tooltip by clicking the "i" icon, or edit the page containing the image by clicking the pencil icon.
 
 ![ml-16](https://github.com/Toutouwai/ProcessMediaLister/assets/1538852/88dc0f12-8cab-42fc-b30f-904e583460bc)
 
