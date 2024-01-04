@@ -4,6 +4,14 @@ Lists images and files from across the site in a sortable and filterable table. 
 
 The module retrieves the data using SQL queries so is able to efficiently list media information for all but the largest of sites.
 
+Possible use cases:
+
+* Check that a nice variety of banner images is used for top-level pages.
+* Find duplicate files/images by sorting by filesize or filename.
+* Find images without descriptions if this is important for use in alt tags.
+* Find large PDF files that would benefit from optimisation.
+* Check for "inappropriate" images, or images that are not "on-brand".
+
 ### Images in small thumbnails view mode
 
 ![ml-main](https://github.com/Toutouwai/ProcessMediaLister/assets/1538852/25f06cdc-2ea2-4e4f-9a7b-9e371c8ae1c0)
