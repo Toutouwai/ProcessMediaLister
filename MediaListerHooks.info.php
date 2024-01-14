@@ -3,7 +3,7 @@
 $info = array(
 	'title' => 'Media Lister: Hooks',
 	'summary' => 'Hooks for Media Lister.',
-	'version' => '0.1.0',
+	'version' => '0.1.1',
 	'author' => 'Robin Sallis',
 	'href' => 'https://github.com/Toutouwai/ProcessMediaLister',
 	'icon' => 'th-large',

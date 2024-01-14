@@ -3,7 +3,7 @@
 $info = array(
 	'title' => 'Media Lister',
 	'summary' => 'Lists images and files from across the site in a sortable and filterable table.',
-	'version' => '0.1.0',
+	'version' => '0.1.1',
 	'author' => 'Robin Sallis',
 	'href' => 'https://github.com/Toutouwai/ProcessMediaLister',
 	'icon' => 'th-large',

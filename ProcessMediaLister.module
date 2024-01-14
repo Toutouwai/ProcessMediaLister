@@ -427,19 +427,24 @@ EOT;
 				if($has_languages) {
 					// Convert language IDs to language names
 					$description = wireDecodeJSON($item['description']);
-					if($description) {
-						$description = array_filter($description);
-						$lang_description = [];
-						foreach($description as $key => $value) {
-							if($key === 0) {
-								$lang_description['default'] = $value;
-							} elseif(isset($langs[$key])) {
-								$lang_description[$langs[$key]] = $value;
-							} else {
-								$lang_description[$key] = $value;
+					if($description === null) {
+						// Cannot decode JSON - might be plain text from before multi-language installed
+						$description = $item['description'];
+					} else {
+						if($description) {
+							$description = array_filter($description);
+							$lang_description = [];
+							foreach($description as $key => $value) {
+								if($key === 0) {
+									$lang_description['default'] = $value;
+								} elseif(isset($langs[$key])) {
+									$lang_description[$langs[$key]] = $value;
+								} else {
+									$lang_description[$key] = $value;
+								}
 							}
+							$description = $this->arrayToText($lang_description);
 						}
-						$description = $this->arrayToText($lang_description);
 					}
 				} else {
 					$description = $item['description'];
