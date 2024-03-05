@@ -8,5 +8,5 @@ $info = array(
 	'href' => 'https://github.com/Toutouwai/ProcessMediaLister',
 	'icon' => 'th-large',
 	'autoload' => 'template=admin',
-	'requires' => 'ProcessWire>=3.0.0, PHP>=7.0.0, ProcessMediaLister',
+	'requires' => 'ProcessWire>=3.0.216, PHP>=7.0.0, ProcessMediaLister',
 );
