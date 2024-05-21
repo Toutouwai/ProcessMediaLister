@@ -355,7 +355,8 @@ EOT;
 			}
 			$select_cols = $cols;
 			if($field->useTags) $select_cols .= ', tags';
-			$results = $database->query("SELECT $select_cols FROM field_{$field->name}$where");
+			$table_name = $field->getTable();
+			$results = $database->query("SELECT $select_cols FROM {$table_name}$where");
 			$data[$field->name] = $results->fetchAll(\PDO::FETCH_ASSOC);
 			$page_ids = $page_ids + array_flip(array_column($data[$field->name], 'pages_id'));
 		}
@@ -564,7 +565,8 @@ EOT;
 		// Get field values from database
 		$queries = [];
 		foreach($repeater_fields as $repeater_field) {
-			$queries[] = "SELECT pages_id, data FROM field_{$repeater_field->name}";
+			$table_name = $repeater_field->getTable();
+			$queries[] = "SELECT pages_id, data FROM $table_name";
 		}
 		$query = implode(' UNION ALL ', $queries);
 		$results = $this->wire()->database->query($query);
