@@ -155,7 +155,7 @@ class ProcessMediaLister extends Process implements ConfigurableModule {
 		// Table: common
 		$table_settings = [
 			'bookmark' => '',
-			'limit' => $this->defaultPaginationLimit,
+			'limit' => (int) $this->defaultPaginationLimit ?: 50,
 			'sort' => [],
 			'search_builder' => new \stdClass(), // To create empty object in JSON
 		];
@@ -715,6 +715,7 @@ EOT;
 		$f->addOption(100, 100);
 		$f->value = $this->$f_name;
 		$f->columnWidth = 33;
+		$f->required = true;
 		$inputfields->add($f);
 
 		/** @var InputfieldCheckboxes $f */
